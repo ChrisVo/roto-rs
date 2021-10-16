@@ -5,7 +5,11 @@ use pv_recorder::{Recorder, RecorderBuilder};
 use rodio::{Decoder, OutputStream, Source};
 use std::fs::File;
 use std::io::BufReader;
+use std::io::{stdin, stdout, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+use termion::event::Key;
+use termion::input::TermRead;
+use termion::raw::IntoRawMode;
 
 const SAMPLE_RATE: usize = 16000;
 
@@ -73,37 +77,52 @@ fn main() {
         .device_index(audio_device_index)
         .init()
         .expect("Failed to initialize pvrecorder");
-
     ctrlc::set_handler(|| {
         LISTENING.store(false, Ordering::SeqCst);
     })
     .expect("Unable to setup signal handler");
 
-    println!("Start recording...");
-    recorder.start().expect("Failed to start audio recording");
-    LISTENING.store(true, Ordering::SeqCst);
+    // Loop and wait for signal
 
-    let mut audio_data = Vec::new();
-    while LISTENING.load(Ordering::SeqCst) {
-        let mut frame_buffer = vec![0; recorder.frame_length()];
-        recorder
-            .read(&mut frame_buffer)
-            .expect("Failed to read audio frame");
-        audio_data.extend_from_slice(&frame_buffer);
-    }
+    loop {
+        println!("Starting the loop");
+        for c in stdin().keys() {
+            println!("Waiting for a key");
+            match c.unwrap() {
+                Key::Char(r) => {
+                    println!("{} received", r);
+                    break
+                }
+                _ => {}
+            }
+        }
 
-    println!("Stop recording...");
-    recorder.stop().expect("Failed to stop audio recording");
+        println!("Start recording...");
+        recorder.start().expect("Failed to start audio recording");
+        LISTENING.store(true, Ordering::SeqCst);
 
-    println!("Dumping audio to file...");
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: SAMPLE_RATE as u32,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let mut writer = hound::WavWriter::create(output_path, spec).unwrap();
-    for sample in audio_data {
-        writer.write_sample(sample).unwrap();
+        let mut audio_data = Vec::new();
+        while LISTENING.load(Ordering::SeqCst) {
+            let mut frame_buffer = vec![0; recorder.frame_length()];
+            recorder
+                .read(&mut frame_buffer)
+                .expect("Failed to read audio frame");
+            audio_data.extend_from_slice(&frame_buffer);
+        }
+
+        println!("Stop recording...");
+        recorder.stop().expect("Failed to stop audio recording");
+
+        println!("Dumping audio to file...");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: SAMPLE_RATE as u32,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(output_path, spec).unwrap();
+        for sample in audio_data {
+            writer.write_sample(sample).unwrap();
+        }
     }
 }
